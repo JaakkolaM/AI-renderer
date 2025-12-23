@@ -6,17 +6,25 @@ import { FabricCanvas } from '@/components/canvas/fabric-canvas';
 import { DrawingTools } from '@/components/canvas/drawing-tools';
 import { ShapeProperties } from '@/components/canvas/shape-properties';
 import { CanvasControls } from '@/components/canvas/canvas-controls';
+import { AIGeneration } from '@/components/canvas/ai-generation';
 import { useCanvasStore } from '@/lib/store/canvas-store';
-import { Moon, Sun } from 'lucide-react';
+import { Moon, Sun, Wand2 } from 'lucide-react';
 
 export function CanvasApp() {
   const canvasRef = useRef<Canvas | null>(null);
   const [isDark, setIsDark] = useState(false);
+  const [showAIPanel, setShowAIPanel] = useState(false);
   const dimensions = useCanvasStore((state) => state.dimensions);
   const undo = useCanvasStore((state) => state.undo);
   const redo = useCanvasStore((state) => state.redo);
   const deleteSelectedShape = useCanvasStore((state) => state.deleteSelectedShape);
   const selectedShapeId = useCanvasStore((state) => state.selectedShapeId);
+  const setCanvasRef = useCanvasStore((state) => state.setCanvasRef);
+  
+  // Set canvas ref in store
+  useEffect(() => {
+    setCanvasRef(canvasRef);
+  }, [setCanvasRef]);
   
   // Toggle dark mode
   const toggleDarkMode = () => {
@@ -71,6 +79,20 @@ export function CanvasApp() {
               Canvas: <span className="font-medium text-foreground">{dimensions.width} × {dimensions.height}px</span>
             </div>
             
+            {/* AI Panel Toggle */}
+            <button
+              onClick={() => setShowAIPanel(!showAIPanel)}
+              className={`px-3 py-2 rounded-lg flex items-center gap-2 font-medium text-sm transition-colors ${
+                showAIPanel 
+                  ? 'bg-primary text-primary-foreground' 
+                  : 'bg-secondary hover:bg-accent text-foreground'
+              }`}
+              title="Toggle AI Generation Panel"
+            >
+              <Wand2 size={18} />
+              AI Generate
+            </button>
+            
             {/* Dark Mode Toggle */}
             <button
               onClick={toggleDarkMode}
@@ -93,8 +115,8 @@ export function CanvasApp() {
           <FabricCanvas canvasRef={canvasRef} />
         </div>
         
-        {/* Shape Properties Panel */}
-        <ShapeProperties />
+        {/* Right Sidebar - Show either AI Generation or Shape Properties */}
+        {showAIPanel ? <AIGeneration /> : <ShapeProperties />}
       </div>
       
       {/* Canvas Controls Footer */}

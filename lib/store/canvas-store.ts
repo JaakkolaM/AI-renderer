@@ -1,4 +1,6 @@
 import { create } from 'zustand';
+import { RefObject } from 'react';
+import { Canvas } from 'fabric';
 import { 
   Shape, 
   Tool, 
@@ -10,6 +12,7 @@ import {
 
 interface CanvasState {
   // Canvas properties
+  canvasRef: RefObject<Canvas> | null;
   dimensions: CanvasDimensions;
   shapes: Shape[];
   selectedShapeId: string | null;
@@ -17,6 +20,7 @@ interface CanvasState {
   backgroundImage: BackgroundImage | null;
   pendingImage: string | null; // URL or data URL of image waiting to be placed
   isDarkMode: boolean;
+  layerVersion: number;
   
   // Drawing settings
   drawingSettings: DrawingSettings;
@@ -27,6 +31,7 @@ interface CanvasState {
   maxHistorySize: number;
   
   // Actions
+  setCanvasRef: (ref: RefObject<Canvas>) => void;
   setDimensions: (dimensions: CanvasDimensions) => void;
   addShape: (shape: Shape) => void;
   updateShape: (id: string, updates: Partial<Shape>) => void;
@@ -64,6 +69,7 @@ interface CanvasState {
 
 export const useCanvasStore = create<CanvasState>((set, get) => ({
   // Initial state
+  canvasRef: null,
   dimensions: { width: 1024, height: 768 },
   shapes: [],
   selectedShapeId: null,
@@ -83,8 +89,11 @@ export const useCanvasStore = create<CanvasState>((set, get) => ({
   history: [],
   historyIndex: -1,
   maxHistorySize: 50,
+  layerVersion: 0,
   
   // Canvas actions
+  setCanvasRef: (ref) => set({ canvasRef: ref }),
+  
   setDimensions: (dimensions) => {
     set({ dimensions });
     get().saveToHistory();
