@@ -1,6 +1,6 @@
 # AI Renderer
 
-A Next.js application for creating AI visualizations with vector drawing tools and AI image generation powered by Flux models.
+A Next.js application for creating AI visualizations with vector drawing tools and AI image generation powered by Gemini.
 
 ## Features
 
