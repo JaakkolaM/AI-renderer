@@ -32,3 +32,4 @@ export const lightingPresets: Record<string, LightingPreset> = {
   }
 };
 
+

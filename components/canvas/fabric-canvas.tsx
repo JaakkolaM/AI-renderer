@@ -17,6 +17,9 @@ export function FabricCanvas({ canvasRef }: FabricCanvasProps) {
   const currentShapeRef = useRef<any>(null);
   const bezierPointsRef = useRef<number[]>([]);
   const polylinePointsRef = useRef<number[]>([]);
+  const imageGhostRef = useRef<FabricImage | null>(null);
+  const imageGhostSrcRef = useRef<string | null>(null);
+  const imageGhostScaleRef = useRef<number>(1);
   
   const dimensions = useCanvasStore((state) => state.dimensions);
   const shapes = useCanvasStore((state) => state.shapes);
@@ -213,51 +216,60 @@ export function FabricCanvas({ canvasRef }: FabricCanvasProps) {
       
       const pointer = canvas.getPointer(e.e);
       
-      // Handle image tool - place image on canvas
-      if (tool === 'image' && pendingImage) {
-        FabricImage.fromURL(pendingImage, {
-          crossOrigin: 'anonymous',
-        }).then((img) => {
-          const id = `shape-${Date.now()}-${Math.random()}`;
-          
-          // Scale image to reasonable size if too large
-          const maxSize = 400;
-          let scale = 1;
-          if (img.width! > maxSize || img.height! > maxSize) {
-            scale = maxSize / Math.max(img.width!, img.height!);
-          }
-          
-          img.set({
-            left: pointer.x,
-            top: pointer.y,
-            scaleX: scale,
-            scaleY: scale,
-          });
-          
-          canvas.add(img);
-          
-          // Add to store
-          useCanvasStore.getState().addShape({
-            id,
-            type: 'image',
-            src: pendingImage,
-            x: pointer.x,
-            y: pointer.y,
-            width: img.width! * scale,
-            height: img.height! * scale,
-            scaleX: scale,
-            scaleY: scale,
-            rotation: 0,
-            strokeColor: '',
-            fillColor: '',
-            strokeWidth: 0,
-            opacity: 1,
-          });
-          
-          useCanvasStore.getState().saveToHistory();
-          canvas.renderAll();
+      // Image tool: ghost preview → click to place → auto-select
+      if (tool === 'image') {
+        if (!pendingImage) return;
+        if (!imageGhostRef.current || imageGhostSrcRef.current !== pendingImage) return;
+
+        const img = imageGhostRef.current;
+        const id = `shape-${Date.now()}-${Math.random()}`;
+
+        // Convert ghost to real object
+        (img as any).data = { ...(img as any).data, isImageGhost: false };
+        img.set({
+          selectable: true,
+          evented: true,
+          opacity: 1,
         });
-        
+        (img as any).customId = id;
+
+        // Ensure it is on canvas and selected
+        if (!canvas.getObjects().includes(img)) {
+          canvas.add(img);
+        }
+        canvas.setActiveObject(img);
+        canvas.renderAll();
+
+        // Persist to store
+        const scaleX = img.scaleX || 1;
+        const scaleY = img.scaleY || 1;
+        useCanvasStore.getState().addShape({
+          id,
+          type: 'image',
+          src: pendingImage,
+          x: img.left || pointer.x,
+          y: img.top || pointer.y,
+          width: (img.width || 0) * scaleX,
+          height: (img.height || 0) * scaleY,
+          scaleX,
+          scaleY,
+          rotation: img.angle || 0,
+          strokeColor: '',
+          fillColor: '',
+          strokeWidth: 0,
+          opacity: 1,
+        });
+
+        // Auto-select in store and switch to select tool for immediate editing
+        useCanvasStore.getState().selectShape(id);
+        useCanvasStore.getState().setTool('select');
+        useCanvasStore.getState().setPendingImage(null);
+
+        // Clear ghost refs (object stays on canvas as real object)
+        imageGhostRef.current = null;
+        imageGhostSrcRef.current = null;
+        imageGhostScaleRef.current = 1;
+
         return;
       }
       
@@ -554,29 +566,84 @@ export function FabricCanvas({ canvasRef }: FabricCanvasProps) {
     };
     
     const handleMouseMove = (e: any) => {
+      // Image ghost follows mouse
+      const tool = useCanvasStore.getState().currentTool;
+      const pendingImage = useCanvasStore.getState().pendingImage;
+      if (tool === 'image' && pendingImage) {
+        const pointer = canvas.getPointer(e.e);
+
+        // (Re)load ghost if needed
+        if (!imageGhostRef.current || imageGhostSrcRef.current !== pendingImage) {
+          // Remove previous ghost if any
+          if (imageGhostRef.current) {
+            canvas.remove(imageGhostRef.current);
+          }
+
+          imageGhostRef.current = null;
+          imageGhostSrcRef.current = pendingImage;
+          imageGhostScaleRef.current = 1;
+
+          FabricImage.fromURL(pendingImage, { crossOrigin: 'anonymous' }).then((img) => {
+            // Might have been cleared while loading
+            const latestTool = useCanvasStore.getState().currentTool;
+            const latestPending = useCanvasStore.getState().pendingImage;
+            if (latestTool !== 'image' || latestPending !== pendingImage) return;
+
+            const maxSize = 400;
+            let scale = 1;
+            if ((img.width || 0) > maxSize || (img.height || 0) > maxSize) {
+              scale = maxSize / Math.max(img.width || 1, img.height || 1);
+            }
+            imageGhostScaleRef.current = scale;
+
+            img.set({
+              left: pointer.x,
+              top: pointer.y,
+              scaleX: scale,
+              scaleY: scale,
+              opacity: 0.6,
+              selectable: false,
+              evented: false,
+            });
+            (img as any).data = { isImageGhost: true };
+
+            // Add on top during preview
+            canvas.add(img);
+            imageGhostRef.current = img;
+            canvas.renderAll();
+          });
+        } else if (imageGhostRef.current) {
+          imageGhostRef.current.set({ left: pointer.x, top: pointer.y });
+          canvas.renderAll();
+        }
+
+        return;
+      }
+
       if (!isDrawingRef.current || !startPointRef.current || !currentShapeRef.current) return;
       
-      const tool = useCanvasStore.getState().currentTool;
+      // tool already declared above for image branch; redeclare for drawing branch
+      const toolDraw = useCanvasStore.getState().currentTool;
       const pointer = canvas.getPointer(e.e);
       const shape = currentShapeRef.current;
       
-      if (tool === 'rectangle') {
+      if (toolDraw === 'rectangle') {
         const width = Math.abs(pointer.x - startPointRef.current.x);
         const height = Math.abs(pointer.y - startPointRef.current.y);
         const left = Math.min(pointer.x, startPointRef.current.x);
         const top = Math.min(pointer.y, startPointRef.current.y);
         shape.set({ width, height, left, top });
-      } else if (tool === 'circle') {
+      } else if (toolDraw === 'circle') {
         const radius = Math.sqrt(
           Math.pow(pointer.x - startPointRef.current.x, 2) + 
           Math.pow(pointer.y - startPointRef.current.y, 2)
         );
         shape.set({ radius });
-      } else if (tool === 'ellipse') {
+      } else if (toolDraw === 'ellipse') {
         const rx = Math.abs(pointer.x - startPointRef.current.x);
         const ry = Math.abs(pointer.y - startPointRef.current.y);
         shape.set({ rx, ry });
-      } else if (tool === 'line') {
+      } else if (toolDraw === 'line') {
         shape.set({ x2: pointer.x, y2: pointer.y });
       }
       
@@ -764,6 +831,20 @@ export function FabricCanvas({ canvasRef }: FabricCanvasProps) {
   
   // Clear bezier points when switching tools
   useEffect(() => {
+    // Clear image ghost when switching away from image tool
+    if (currentTool !== 'image' && imageGhostRef.current) {
+      const canvas = canvasRef.current;
+      if (canvas) {
+        canvas.remove(imageGhostRef.current);
+        canvas.renderAll();
+      }
+      imageGhostRef.current = null;
+      imageGhostSrcRef.current = null;
+      imageGhostScaleRef.current = 1;
+      // Also clear pending image so accidental placement doesn't happen later
+      useCanvasStore.getState().setPendingImage(null);
+    }
+
     if (currentTool !== 'bezier' && bezierPointsRef.current.length > 0) {
       const canvas = canvasRef.current;
       if (canvas) {

@@ -12,7 +12,7 @@ import {
 
 interface CanvasState {
   // Canvas properties
-  canvasRef: RefObject<Canvas> | null;
+  canvasRef: RefObject<Canvas | null> | null;
   dimensions: CanvasDimensions;
   shapes: Shape[];
   selectedShapeId: string | null;
@@ -31,7 +31,7 @@ interface CanvasState {
   maxHistorySize: number;
   
   // Actions
-  setCanvasRef: (ref: RefObject<Canvas>) => void;
+  setCanvasRef: (ref: RefObject<Canvas | null>) => void;
   setDimensions: (dimensions: CanvasDimensions) => void;
   addShape: (shape: Shape) => void;
   updateShape: (id: string, updates: Partial<Shape>) => void;

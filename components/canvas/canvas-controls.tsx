@@ -20,6 +20,7 @@ export function CanvasControls() {
   const setBackgroundImage = useCanvasStore((state) => state.setBackgroundImage);
   const updateBackgroundOpacity = useCanvasStore((state) => state.updateBackgroundOpacity);
   const clearShapes = useCanvasStore((state) => state.clearShapes);
+  const canvasRef = useCanvasStore((state) => state.canvasRef);
   const undo = useCanvasStore((state) => state.undo);
   const redo = useCanvasStore((state) => state.redo);
   const canUndo = useCanvasStore((state) => state.canUndo());
@@ -66,6 +67,29 @@ export function CanvasControls() {
     },
     multiple: false,
   });
+
+  const downloadDataUrl = (dataUrl: string, filename: string) => {
+    const a = document.createElement('a');
+    a.href = dataUrl;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+  };
+
+  const exportPng = () => {
+    const canvas = canvasRef?.current;
+    if (!canvas) return;
+    const dataUrl = canvas.toDataURL({ format: 'png', multiplier: 1 });
+    downloadDataUrl(dataUrl, `ai-renderer-${Date.now()}.png`);
+  };
+
+  const exportJpg = () => {
+    const canvas = canvasRef?.current;
+    if (!canvas) return;
+    const dataUrl = canvas.toDataURL({ format: 'jpeg', quality: 0.92, multiplier: 1 });
+    downloadDataUrl(dataUrl, `ai-renderer-${Date.now()}.jpg`);
+  };
   
   return (
     <div className="bg-card border-t-2 border-border p-4">
@@ -196,6 +220,29 @@ export function CanvasControls() {
           <Trash2 size={16} />
           Clear All
         </button>
+
+        {/* Divider */}
+        <div className="h-8 w-px bg-border" />
+
+        {/* Export */}
+        <div className="flex items-center gap-2">
+          <button
+            onClick={exportPng}
+            className="px-3 py-1.5 bg-secondary hover:bg-secondary/80 rounded text-sm font-medium flex items-center gap-1 text-secondary-foreground"
+            title="Save PNG"
+          >
+            <Download size={16} />
+            Save PNG
+          </button>
+          <button
+            onClick={exportJpg}
+            className="px-3 py-1.5 bg-secondary hover:bg-secondary/80 rounded text-sm font-medium flex items-center gap-1 text-secondary-foreground"
+            title="Save JPG"
+          >
+            <Download size={16} />
+            Save JPG
+          </button>
+        </div>
         
         {/* Shape Count */}
         <div className="ml-auto text-sm text-muted-foreground">

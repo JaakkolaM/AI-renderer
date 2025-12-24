@@ -66,6 +66,7 @@ export interface LineShape extends BaseShape {
 export interface BezierShape extends BaseShape {
   type: 'bezier';
   points: number[]; // Array of x,y coordinates for bezier curve
+  closed?: boolean; // Whether the shape is closed
 }
 
 // Polyline shape (straight lines between multiple points)

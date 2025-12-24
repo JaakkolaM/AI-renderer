@@ -139,7 +139,7 @@ export function DrawingTools() {
       
       {/* Advanced Settings */}
       {showAdvanced && (
-        <div className="fixed left-24 top-20 bg-card border-2 border-border rounded-lg shadow-lg p-4 w-64 z-50">
+        <div className="fixed left-24 top-24 bg-card border-2 border-border rounded-lg shadow-lg p-4 w-64 z-50">
           <h3 className="font-bold text-sm mb-3 text-card-foreground">Drawing Settings</h3>
           
           {/* Stroke Color */}
