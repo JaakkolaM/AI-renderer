@@ -4,6 +4,7 @@
   "private": true,
   "scripts": {
     "dev": "next dev",
+    "dev:open": "next dev & timeout /t 3 /nobreak >nul & start http://localhost:3000",
     "build": "next build",
     "start": "next start",
     "lint": "next lint"
