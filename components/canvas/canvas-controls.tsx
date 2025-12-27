@@ -10,8 +10,16 @@ import {
   Image as ImageIcon,
   X
 } from 'lucide-react';
-import { useCallback } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { useDropzone } from 'react-dropzone';
+import { 
+  ASPECT_RATIOS,
+  RESOLUTION_LONG_EDGE,
+  type AspectRatio,
+  type ResolutionLongEdge,
+  computeTargetFromLongEdge,
+  findMatchingPreset,
+} from '@/lib/sizing';
 
 export function CanvasControls() {
   const dimensions = useCanvasStore((state) => state.dimensions);
@@ -26,15 +34,28 @@ export function CanvasControls() {
   const canUndo = useCanvasStore((state) => state.canUndo());
   const canRedo = useCanvasStore((state) => state.canRedo());
   const shapes = useCanvasStore((state) => state.shapes);
+  const [canvasSizeMode, setCanvasSizeMode] = useState<'preset' | 'custom'>(() => {
+    const match = findMatchingPreset(dimensions.width, dimensions.height);
+    return match ? 'preset' : 'custom';
+  });
+  const [presetLongEdge, setPresetLongEdge] = useState<ResolutionLongEdge>(() => {
+    const match = findMatchingPreset(dimensions.width, dimensions.height);
+    return match?.longEdge ?? 1024;
+  });
+  const [presetAspect, setPresetAspect] = useState<AspectRatio>(() => {
+    const match = findMatchingPreset(dimensions.width, dimensions.height);
+    return match?.aspect ?? '4:3';
+  });
   
-  // Canvas size presets
-  const sizePresets = [
-    { label: '512×512', width: 512, height: 512 },
-    { label: '768×768', width: 768, height: 768 },
-    { label: '1024×768', width: 1024, height: 768 },
-    { label: '768×1024', width: 768, height: 1024 },
-    { label: '1024×1024', width: 1024, height: 1024 },
-  ];
+  // Keep preset selectors in sync when user is using presets.
+  useEffect(() => {
+    if (canvasSizeMode !== 'preset') return;
+    const match = findMatchingPreset(dimensions.width, dimensions.height);
+    if (match) {
+      setPresetLongEdge(match.longEdge);
+      setPresetAspect(match.aspect);
+    }
+  }, [canvasSizeMode, dimensions.width, dimensions.height]);
   
   // Handle background image upload
   const onDrop = useCallback((acceptedFiles: File[]) => {
@@ -98,37 +119,86 @@ export function CanvasControls() {
         <div className="flex items-center gap-2">
           <label className="text-sm font-medium text-foreground">Canvas Size:</label>
           <select
-            value={`${dimensions.width}x${dimensions.height}`}
+            value={canvasSizeMode}
             onChange={(e) => {
-              const [width, height] = e.target.value.split('x').map(Number);
-              setDimensions({ width, height });
+              const mode = e.target.value as 'preset' | 'custom';
+              setCanvasSizeMode(mode);
+              if (mode === 'preset') {
+                const target = computeTargetFromLongEdge(presetLongEdge, presetAspect);
+                setDimensions(target);
+              }
             }}
             className="px-3 py-1.5 border border-border rounded text-sm bg-background text-foreground"
+            title="Choose preset sizing or custom size"
           >
-            {sizePresets.map((preset) => (
-              <option key={preset.label} value={`${preset.width}x${preset.height}`}>
-                {preset.label}
-              </option>
-            ))}
+            <option value="preset">Preset</option>
             <option value="custom">Custom</option>
           </select>
-          
-          {/* Custom Size Inputs */}
-          <input
-            type="number"
-            value={dimensions.width}
-            onChange={(e) => setDimensions({ ...dimensions, width: Number(e.target.value) })}
-            className="w-20 px-2 py-1.5 border border-border rounded text-sm bg-background text-foreground"
-            placeholder="Width"
-          />
-          <span className="text-muted-foreground">×</span>
-          <input
-            type="number"
-            value={dimensions.height}
-            onChange={(e) => setDimensions({ ...dimensions, height: Number(e.target.value) })}
-            className="w-20 px-2 py-1.5 border border-border rounded text-sm bg-background text-foreground"
-            placeholder="Height"
-          />
+
+          {canvasSizeMode === 'preset' ? (
+            <>
+              <select
+                value={presetLongEdge}
+                onChange={(e) => {
+                  const longEdge = Number(e.target.value) as ResolutionLongEdge;
+                  setPresetLongEdge(longEdge);
+                  const target = computeTargetFromLongEdge(longEdge, presetAspect);
+                  setDimensions(target);
+                }}
+                className="px-3 py-1.5 border border-border rounded text-sm bg-background text-foreground"
+                title="Resolution (long edge)"
+              >
+                {RESOLUTION_LONG_EDGE.map((r) => (
+                  <option key={r} value={r}>
+                    {r === 1024 ? '1K' : r === 2048 ? '2K' : '4K'}
+                  </option>
+                ))}
+              </select>
+
+              <select
+                value={presetAspect}
+                onChange={(e) => {
+                  const aspect = e.target.value as AspectRatio;
+                  setPresetAspect(aspect);
+                  const target = computeTargetFromLongEdge(presetLongEdge, aspect);
+                  setDimensions(target);
+                }}
+                className="px-3 py-1.5 border border-border rounded text-sm bg-background text-foreground"
+                title="Aspect ratio"
+              >
+                {ASPECT_RATIOS.map((a) => (
+                  <option key={a} value={a}>
+                    {a}
+                  </option>
+                ))}
+              </select>
+
+              <span className="text-muted-foreground text-sm">
+                {dimensions.width}×{dimensions.height}
+              </span>
+            </>
+          ) : (
+            <>
+              {/* Custom Size Inputs */}
+              <input
+                type="number"
+                min={1}
+                value={dimensions.width}
+                onChange={(e) => setDimensions({ ...dimensions, width: Number(e.target.value) })}
+                className="w-24 px-2 py-1.5 border border-border rounded text-sm bg-background text-foreground"
+                placeholder="Width"
+              />
+              <span className="text-muted-foreground">×</span>
+              <input
+                type="number"
+                min={1}
+                value={dimensions.height}
+                onChange={(e) => setDimensions({ ...dimensions, height: Number(e.target.value) })}
+                className="w-24 px-2 py-1.5 border border-border rounded text-sm bg-background text-foreground"
+                placeholder="Height"
+              />
+            </>
+          )}
         </div>
         
         {/* Divider */}

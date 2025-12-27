@@ -109,7 +109,7 @@ export const useCanvasStore = create<CanvasState>((set, get) => ({
   updateShape: (id, updates) => {
     set((state) => ({
       shapes: state.shapes.map((shape) =>
-        shape.id === id ? { ...shape, ...updates } : shape
+        shape.id === id ? ({ ...shape, ...updates } as Shape) : shape
       ),
     }));
   },

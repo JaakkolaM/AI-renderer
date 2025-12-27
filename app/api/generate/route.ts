@@ -1,10 +1,28 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { GoogleGenerativeAI } from '@google/generative-ai';
 import { lightingPresets } from '@/lib/presets';
+import sharp from 'sharp';
+import { ASPECT_RATIOS, computeTargetFromLongEdge, makeEvenDimensions } from '@/lib/sizing';
+
+export const runtime = 'nodejs';
 
 export async function POST(request: NextRequest) {
   try {
-    const { prompt, canvasImage, useCanvas, quality, preset, materialReference, materialWeight } = await request.json();
+    const {
+      prompt,
+      canvasImage,
+      useCanvas,
+      quality,
+      preset,
+      materialReference,
+      materialWeight,
+      materialReferences,
+      outputMode = 'canvas',
+      outputLongEdge = 2048,
+      outputAspectRatio = '1:1',
+      outputWidth,
+      outputHeight,
+    } = await request.json();
 
     if (!prompt) {
       return NextResponse.json(
@@ -68,6 +86,42 @@ Respond ONLY with the enhanced prompt, no other text.`;
         // Continue with original prompt if vision fails
       }
     }
+
+    // Determine target output size
+    const clamp = (n: number, min: number, max: number) => Math.max(min, Math.min(max, n));
+    const maxLongEdge = 4096;
+    const minEdge = 64;
+
+    let targetWidth: number;
+    let targetHeight: number;
+
+    if (outputMode === 'canvas' && Number.isFinite(outputWidth) && Number.isFinite(outputHeight)) {
+      targetWidth = Math.round(Number(outputWidth));
+      targetHeight = Math.round(Number(outputHeight));
+    } else {
+      const longEdge = clamp(Math.round(Number(outputLongEdge) || 2048), minEdge, maxLongEdge);
+      const aspect = (ASPECT_RATIOS as readonly string[]).includes(outputAspectRatio)
+        ? (outputAspectRatio as any)
+        : '1:1';
+      const t = computeTargetFromLongEdge(longEdge, aspect);
+      targetWidth = t.width;
+      targetHeight = t.height;
+    }
+
+    // Cap "use canvas size" to maxLongEdge while preserving aspect
+    const currentLongEdge = Math.max(targetWidth, targetHeight);
+    if (currentLongEdge > maxLongEdge) {
+      const scale = maxLongEdge / currentLongEdge;
+      targetWidth = Math.max(minEdge, Math.round(targetWidth * scale));
+      targetHeight = Math.max(minEdge, Math.round(targetHeight * scale));
+    }
+
+    // Make even for better compatibility in some pipelines
+    ({ width: targetWidth, height: targetHeight } = makeEvenDimensions({ width: targetWidth, height: targetHeight }));
+
+    const promptBeforeConstraints = finalPrompt;
+    // Add output constraints to prompt as a hint (server still enforces exact size via resizing)
+    finalPrompt = `${finalPrompt}\n\nOutput constraints: ${targetWidth}x${targetHeight}px. Fill the frame edge-to-edge. No borders.`;
     
     // Generate image using Gemini image generation model
     const imageModel = genAI.getGenerativeModel({ 
@@ -84,17 +138,28 @@ Respond ONLY with the enhanced prompt, no other text.`;
     // Build request parts - order matters for multi-image input
     const parts: any[] = [];
     
-    // Add material reference instruction and image first (if provided)
-    if (materialReference) {
-      const materialIntensity = Math.round((materialWeight || 0.7) * 100);
-      parts.push({ 
-        text: `Apply the material texture from this reference image with ${materialIntensity}% intensity. Analyze the color, surface properties, reflectivity, and grain pattern:` 
+    // Add material reference instruction + images first (if provided)
+    // Supports both legacy single image fields and new multi-image array.
+    const normalizedMaterialRefs: Array<{ dataUrl: string; weight?: number }> = Array.isArray(materialReferences)
+      ? materialReferences
+      : materialReference
+        ? [{ dataUrl: materialReference, weight: materialWeight }]
+        : [];
+
+    for (const ref of normalizedMaterialRefs.slice(0, 8)) {
+      if (!ref?.dataUrl) continue;
+      const intensity = Math.round(((ref.weight ?? 0.7) as number) * 100);
+      parts.push({
+        text: `Material reference (${intensity}%): analyze color, surface properties, reflectivity, and grain pattern, then apply these properties to the product surface:`,
       });
-      
-      const materialBase64 = materialReference.replace(/^data:image\/\w+;base64,/, '');
+
+      const mimeMatch = ref.dataUrl.match(/^data:(image\/[a-zA-Z0-9.+-]+);base64,/);
+      const mimeType = mimeMatch?.[1] || 'image/png';
+      const materialBase64 = ref.dataUrl.replace(/^data:image\/\w+;base64,/, '').replace(/^data:(image\/[a-zA-Z0-9.+-]+);base64,/, '');
+
       parts.push({
         inlineData: {
-          mimeType: 'image/png',
+          mimeType,
           data: materialBase64,
         },
       });
@@ -134,13 +199,25 @@ Respond ONLY with the enhanced prompt, no other text.`;
     
     const imageBase64 = imagePart.inlineData.data;
     const mimeType = imagePart.inlineData.mimeType || 'image/png';
-    const imageUrl = `data:${mimeType};base64,${imageBase64}`;
+
+    // Enforce exact output size (cover/crop)
+    const inputBuffer = Buffer.from(imageBase64, 'base64');
+    const resizedBuffer = await sharp(inputBuffer)
+      .resize(targetWidth, targetHeight, { fit: 'cover', position: 'centre' })
+      .png()
+      .toBuffer();
+
+    const resizedBase64 = resizedBuffer.toString('base64');
+    const imageUrl = `data:image/png;base64,${resizedBase64}`;
     
     return NextResponse.json({
       success: true,
       imageUrl: imageUrl,
       model: modelName,
-      enhancedPrompt: finalPrompt !== prompt ? finalPrompt : undefined,
+      enhancedPrompt: promptBeforeConstraints !== prompt ? promptBeforeConstraints : undefined,
+      outputWidth: targetWidth,
+      outputHeight: targetHeight,
+      sourceMimeType: mimeType,
     });
     
   } catch (error: any) {

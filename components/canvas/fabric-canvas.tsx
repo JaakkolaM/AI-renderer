@@ -1003,7 +1003,12 @@ export function FabricCanvas({ canvasRef }: FabricCanvasProps) {
           break;
           
         case 'line':
-          fabricObj = new Line(shape.points, {
+          {
+            const pts =
+              shape.points && shape.points.length === 4
+                ? (shape.points as [number, number, number, number])
+                : ([0, 0, 100, 0] as [number, number, number, number]);
+            fabricObj = new Line(pts, {
             left: shape.x,
             top: shape.y,
             angle: shape.rotation,
@@ -1017,7 +1022,8 @@ export function FabricCanvas({ canvasRef }: FabricCanvasProps) {
             hasRotatingPoint: true,
             hasBorders: true,
             hasControls: true,
-          });
+            });
+          }
           
           // Configure line controls - show all corners for easier manipulation
           if (fabricObj) {
@@ -1138,12 +1144,19 @@ export function FabricCanvas({ canvasRef }: FabricCanvasProps) {
                 crossOrigin: 'anonymous',
               });
               
+              const imgW = fabricObj.width || 1;
+              const imgH = fabricObj.height || 1;
+              const targetW = shape.width || imgW;
+              const targetH = shape.height || imgH;
+              const sx = targetW / imgW;
+              const sy = targetH / imgH;
+
               fabricObj.set({
                 left: shape.x,
                 top: shape.y,
                 angle: shape.rotation,
-                scaleX: shape.scaleX || 1,
-                scaleY: shape.scaleY || 1,
+                scaleX: sx,
+                scaleY: sy,
                 opacity: shape.opacity,
               });
             } catch (error) {

@@ -1,10 +1,17 @@
 'use client';
 
-import { useState, useCallback } from 'react';
+import { useMemo, useState, useCallback } from 'react';
 import { Wand2, Loader2, Download, Image as ImageIcon, X } from 'lucide-react';
 import { useDropzone } from 'react-dropzone';
 import { useCanvasStore } from '@/lib/store/canvas-store';
 import { lightingPresets } from '@/lib/presets';
+import {
+  ASPECT_RATIOS,
+  RESOLUTION_LONG_EDGE,
+  type AspectRatio,
+  type ResolutionLongEdge,
+  computeTargetFromLongEdge,
+} from '@/lib/sizing';
 
 export function AIGeneration() {
   const [prompt, setPrompt] = useState('');
@@ -12,34 +19,68 @@ export function AIGeneration() {
   const [quality, setQuality] = useState<'preview' | 'final'>('preview');
   const [isGenerating, setIsGenerating] = useState(false);
   const [generatedImage, setGeneratedImage] = useState<string | null>(null);
+  const [generatedMeta, setGeneratedMeta] = useState<{ width: number; height: number } | null>(null);
   const [error, setError] = useState<string | null>(null);
   
   // New state for product rendering features
   const [selectedPreset, setSelectedPreset] = useState<string>('none');
-  const [materialReference, setMaterialReference] = useState<string | null>(null);
-  const [materialWeight, setMaterialWeight] = useState<number>(0.7);
+  type MaterialRef = { id: string; dataUrl: string; weight: number };
+  const MAX_MATERIAL_REFS = 8;
+  const [materialReferences, setMaterialReferences] = useState<MaterialRef[]>([]);
 
   const canvasRef = useCanvasStore((state) => state.canvasRef);
+  const canvasDimensions = useCanvasStore((state) => state.dimensions);
   const addShape = useCanvasStore((state) => state.addShape);
 
-  // Material reference upload handler
-  const onMaterialDrop = useCallback((acceptedFiles: File[]) => {
-    if (acceptedFiles.length > 0) {
-      const file = acceptedFiles[0];
-      const reader = new FileReader();
-      reader.onload = () => {
-        setMaterialReference(reader.result as string);
-      };
-      reader.readAsDataURL(file);
+  // Output sizing
+  const [outputMode, setOutputMode] = useState<'canvas' | 'preset'>('canvas');
+  const [outputLongEdge, setOutputLongEdge] = useState<ResolutionLongEdge>(2048);
+  const [outputAspect, setOutputAspect] = useState<AspectRatio>('1:1');
+
+  const targetSize = useMemo(() => {
+    if (outputMode === 'canvas') {
+      return { width: canvasDimensions.width, height: canvasDimensions.height };
     }
-  }, []);
+    return computeTargetFromLongEdge(outputLongEdge, outputAspect);
+  }, [outputMode, canvasDimensions.width, canvasDimensions.height, outputLongEdge, outputAspect]);
+
+  const readFileAsDataUrl = (file: File) =>
+    new Promise<string>((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(reader.result as string);
+      reader.onerror = () => reject(new Error('Failed to read file'));
+      reader.readAsDataURL(file);
+    });
+
+  // Material reference upload handler (multi)
+  const onMaterialDrop = useCallback(
+    async (acceptedFiles: File[]) => {
+      if (!acceptedFiles.length) return;
+
+      const availableSlots = Math.max(0, MAX_MATERIAL_REFS - materialReferences.length);
+      if (availableSlots <= 0) return;
+
+      const filesToAdd = acceptedFiles.slice(0, availableSlots);
+      const dataUrls = await Promise.all(filesToAdd.map(readFileAsDataUrl));
+
+      setMaterialReferences((prev) => [
+        ...prev,
+        ...dataUrls.map((dataUrl) => ({
+          id: `mat-${Date.now()}-${Math.random()}`,
+          dataUrl,
+          weight: 0.7,
+        })),
+      ]);
+    },
+    [materialReferences.length]
+  );
 
   const { getRootProps: getMaterialRootProps, getInputProps: getMaterialInputProps, isDragActive: isMaterialDragActive } = useDropzone({
     onDrop: onMaterialDrop,
     accept: {
       'image/*': ['.png', '.jpg', '.jpeg', '.webp']
     },
-    multiple: false
+    multiple: true
   });
 
   const exportCanvasAsBase64 = (): string | null => {
@@ -78,6 +119,7 @@ export function AIGeneration() {
     setIsGenerating(true);
     setError(null);
     setGeneratedImage(null);
+    setGeneratedMeta(null);
 
     try {
       let canvasImage = null;
@@ -99,8 +141,15 @@ export function AIGeneration() {
           useCanvas,
           quality,
           preset: selectedPreset,
-          materialReference,
-          materialWeight,
+          materialReferences: materialReferences.map((m) => ({
+            dataUrl: m.dataUrl,
+            weight: m.weight,
+          })),
+          outputMode,
+          outputLongEdge: outputMode === 'preset' ? outputLongEdge : undefined,
+          outputAspectRatio: outputMode === 'preset' ? outputAspect : undefined,
+          outputWidth: outputMode === 'canvas' ? canvasDimensions.width : undefined,
+          outputHeight: outputMode === 'canvas' ? canvasDimensions.height : undefined,
         }),
       });
 
@@ -112,6 +161,9 @@ export function AIGeneration() {
 
       if (data.success && data.imageUrl) {
         setGeneratedImage(data.imageUrl);
+        if (typeof data.outputWidth === 'number' && typeof data.outputHeight === 'number') {
+          setGeneratedMeta({ width: data.outputWidth, height: data.outputHeight });
+        }
       } else {
         throw new Error('No image URL received');
       }
@@ -127,14 +179,20 @@ export function AIGeneration() {
     if (!generatedImage) return;
 
     const id = `shape-${Date.now()}-${Math.random()}`;
+    const meta = generatedMeta ?? targetSize;
+    const maxOnCanvas = 400;
+    const scale = maxOnCanvas / Math.max(meta.width, meta.height);
+    const displayWidth = Math.max(1, Math.round(meta.width * scale));
+    const displayHeight = Math.max(1, Math.round(meta.height * scale));
+
     addShape({
       id,
       type: 'image',
       src: generatedImage,
       x: 100,
       y: 100,
-      width: 512,
-      height: 512,
+      width: displayWidth,
+      height: displayHeight,
       scaleX: 1,
       scaleY: 1,
       rotation: 0,
@@ -145,6 +203,7 @@ export function AIGeneration() {
     });
 
     setGeneratedImage(null);
+    setGeneratedMeta(null);
   };
 
   return (
@@ -212,10 +271,10 @@ export function AIGeneration() {
       {/* Material Reference Upload */}
       <div className="mb-4">
         <label className="text-xs font-medium block mb-2 text-foreground">
-          Material Reference (Optional)
+          Material References (Optional)
         </label>
         
-        {!materialReference ? (
+        <div className="space-y-3">
           <div {...getMaterialRootProps()} className="cursor-pointer">
             <input {...getMaterialInputProps()} />
             <div
@@ -228,52 +287,67 @@ export function AIGeneration() {
               `}
             >
               <ImageIcon size={16} />
-              <span>Upload Material Texture</span>
+              <span>
+                {materialReferences.length >= MAX_MATERIAL_REFS
+                  ? `Max ${MAX_MATERIAL_REFS} references reached`
+                  : `Add material textures (${materialReferences.length}/${MAX_MATERIAL_REFS})`}
+              </span>
             </div>
           </div>
-        ) : (
-          <div className="space-y-2">
-            <div className="relative border border-border rounded overflow-hidden">
-              <img
-                src={materialReference}
-                alt="Material Reference"
-                className="w-full h-32 object-cover"
-              />
-              <button
-                onClick={() => setMaterialReference(null)}
-                className="absolute top-2 right-2 p-1 bg-destructive hover:bg-destructive/90 text-destructive-foreground rounded"
-                title="Remove material"
-              >
-                <X size={16} />
-              </button>
-            </div>
-            <p className="text-xs text-muted-foreground">
-              Material texture will be applied to the generated object
-            </p>
-          </div>
-        )}
-      </div>
 
-      {/* Material Weight Slider */}
-      {materialReference && (
-        <div className="mb-4">
-          <label className="text-xs font-medium block mb-2 text-foreground">
-            Material Intensity: {Math.round(materialWeight * 100)}%
-          </label>
-          <input
-            type="range"
-            min="0"
-            max="1"
-            step="0.1"
-            value={materialWeight}
-            onChange={(e) => setMaterialWeight(Number(e.target.value))}
-            className="w-full"
-          />
-          <p className="text-xs text-muted-foreground mt-1">
-            How strongly to apply the material texture
-          </p>
+          {materialReferences.length > 0 && (
+            <div className="space-y-2">
+              <div className="grid grid-cols-2 gap-2">
+                {materialReferences.map((m) => (
+                  <div key={m.id} className="border border-border rounded overflow-hidden">
+                    <div className="relative">
+                      <img
+                        src={m.dataUrl}
+                        alt="Material Reference"
+                        className="w-full h-24 object-cover"
+                      />
+                      <button
+                        onClick={() =>
+                          setMaterialReferences((prev) => prev.filter((x) => x.id !== m.id))
+                        }
+                        className="absolute top-1 right-1 p-1 bg-destructive hover:bg-destructive/90 text-destructive-foreground rounded"
+                        title="Remove material"
+                      >
+                        <X size={14} />
+                      </button>
+                    </div>
+
+                    <div className="p-2 space-y-1">
+                      <div className="flex items-center justify-between text-xs">
+                        <span className="text-muted-foreground">Intensity</span>
+                        <span className="text-foreground">{Math.round(m.weight * 100)}%</span>
+                      </div>
+                      <input
+                        type="range"
+                        min="0"
+                        max="1"
+                        step="0.05"
+                        value={m.weight}
+                        onChange={(e) => {
+                          const w = Number(e.target.value);
+                          setMaterialReferences((prev) =>
+                            prev.map((x) => (x.id === m.id ? { ...x, weight: w } : x))
+                          );
+                        }}
+                        className="w-full"
+                      />
+                    </div>
+                  </div>
+                ))}
+              </div>
+
+              <p className="text-xs text-muted-foreground">
+                All references are applied; higher intensity influences materials more strongly.
+              </p>
+            </div>
+          )}
         </div>
-      )}
+      </div>
 
       {/* Quality Selection */}
       <div className="mb-4">
@@ -306,6 +380,72 @@ export function AIGeneration() {
           {quality === 'preview' 
             ? 'Nano Banana: Fast generation with low latency' 
             : 'Nano Banana Pro: 4K resolution, high fidelity'}
+        </p>
+      </div>
+
+      {/* Output Size */}
+      <div className="mb-4">
+        <label className="text-xs font-medium block mb-2 text-foreground">
+          Output Size
+        </label>
+
+        <div className="flex flex-col gap-2">
+          <label className="flex items-center gap-2 text-sm cursor-pointer">
+            <input
+              type="radio"
+              name="outputMode"
+              checked={outputMode === 'canvas'}
+              onChange={() => setOutputMode('canvas')}
+              className="cursor-pointer"
+            />
+            <span className="text-foreground">Use current canvas size</span>
+            <span className="text-xs text-muted-foreground">
+              ({canvasDimensions.width}×{canvasDimensions.height})
+            </span>
+          </label>
+
+          <label className="flex items-center gap-2 text-sm cursor-pointer">
+            <input
+              type="radio"
+              name="outputMode"
+              checked={outputMode === 'preset'}
+              onChange={() => setOutputMode('preset')}
+              className="cursor-pointer"
+            />
+            <span className="text-foreground">Preset</span>
+          </label>
+
+          {outputMode === 'preset' && (
+            <div className="grid grid-cols-2 gap-2">
+              <select
+                value={outputLongEdge}
+                onChange={(e) => setOutputLongEdge(Number(e.target.value) as ResolutionLongEdge)}
+                className="w-full px-3 py-2 border border-border rounded bg-background text-foreground text-sm cursor-pointer"
+              >
+                {RESOLUTION_LONG_EDGE.map((r) => (
+                  <option key={r} value={r}>
+                    {r === 1024 ? '1K' : r === 2048 ? '2K' : '4K'}
+                  </option>
+                ))}
+              </select>
+
+              <select
+                value={outputAspect}
+                onChange={(e) => setOutputAspect(e.target.value as AspectRatio)}
+                className="w-full px-3 py-2 border border-border rounded bg-background text-foreground text-sm cursor-pointer"
+              >
+                {ASPECT_RATIOS.map((a) => (
+                  <option key={a} value={a}>
+                    {a}
+                  </option>
+                ))}
+              </select>
+            </div>
+          )}
+        </div>
+
+        <p className="text-xs text-muted-foreground mt-1">
+          Target: {targetSize.width}×{targetSize.height}px
         </p>
       </div>
 
