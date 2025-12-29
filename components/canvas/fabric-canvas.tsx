@@ -1,7 +1,7 @@
 'use client';
 
 import { useRef, useEffect, useState } from 'react';
-import { Canvas, Rect, Circle, Ellipse, Line, FabricImage, Path, Polyline } from 'fabric';
+import { Canvas, Rect, Circle, Ellipse, Line, FabricImage, Path, Polyline, Textbox } from 'fabric';
 import * as fabric from 'fabric';
 import { useCanvasStore } from '@/lib/store/canvas-store';
 import { Shape } from '@/lib/types';
@@ -137,6 +137,25 @@ export function FabricCanvas({ canvasRef }: FabricCanvasProps) {
           // For Path (bezier) and Polyline, save scale transforms
           updates.scaleX = obj.scaleX || 1;
           updates.scaleY = obj.scaleY || 1;
+        } else if (obj instanceof Textbox) {
+          // For Textbox, convert horizontal scaling into width and reset scale
+          const scaleX = obj.scaleX || 1;
+          const scaleY = obj.scaleY || 1;
+          updates.width = (obj.width || 0) * scaleX;
+          updates.scaleX = 1;
+          updates.scaleY = 1;
+          updates.text = obj.text || '';
+
+          // Keep font-related props in sync when changed by Fabric/UI
+          updates.fontSize = (obj as any).fontSize || updates.fontSize;
+          updates.fontFamily = (obj as any).fontFamily || updates.fontFamily;
+          updates.fontWeight = (obj as any).fontWeight || updates.fontWeight;
+          updates.fontStyle = (obj as any).fontStyle || updates.fontStyle;
+          updates.textAlign = (obj as any).textAlign || updates.textAlign;
+
+          // Reset scale to avoid compound scaling
+          obj.set({ scaleX: 1, scaleY: 1, width: updates.width });
+          obj.setCoords();
         } else if (obj instanceof FabricImage) {
           // For images, save all transforms including scale
           updates.scaleX = obj.scaleX || 1;
@@ -215,6 +234,36 @@ export function FabricCanvas({ canvasRef }: FabricCanvasProps) {
       if (tool === 'select' || tool === 'delete') return;
       
       const pointer = canvas.getPointer(e.e);
+
+      // Text tool: click to place → auto-select → auto-edit → switch to select
+      if (tool === 'text') {
+        const id = `shape-${Date.now()}-${Math.random()}`;
+        useCanvasStore.getState().addShape({
+          id,
+          type: 'text',
+          text: 'Text',
+          x: pointer.x,
+          y: pointer.y,
+          width: 260,
+          fontSize: 32,
+          fontFamily: 'Arial',
+          fontStyle: 'normal',
+          fontWeight: 'normal',
+          textAlign: 'left',
+          rotation: 0,
+          // Use fillColor as text color; default to stroke color from settings
+          fillColor: settings.strokeColor,
+          // Optional outline
+          strokeColor: 'transparent',
+          strokeWidth: 0,
+          opacity: 1,
+        } as any);
+
+        useCanvasStore.getState().selectShape(id);
+        useCanvasStore.getState().setPendingTextEditId(id);
+        useCanvasStore.getState().setTool('select');
+        return;
+      }
       
       // Image tool: ghost preview → click to place → auto-select
       if (tool === 'image') {
@@ -941,10 +990,19 @@ export function FabricCanvas({ canvasRef }: FabricCanvasProps) {
     if (!canvas) return;
     
     const selectedShapeId = useCanvasStore.getState().selectedShapeId;
+    const pendingTextEditId = useCanvasStore.getState().pendingTextEditId;
+
+    // If a textbox is currently being edited, keep it on-canvas to avoid breaking editing.
+    const active = canvas.getActiveObject() as any;
+    const activeEditingTextId =
+      active && (active as any).isEditing && (active as any).customId ? (active as any).customId : null;
     
     // Remove all objects (but keep background)
     const objects = canvas.getObjects();
-    objects.forEach(obj => canvas.remove(obj));
+    objects.forEach(obj => {
+      if (activeEditingTextId && (obj as any).customId === activeEditingTextId) return;
+      canvas.remove(obj);
+    });
     
     let objectToSelect: any = null;
     
@@ -952,6 +1010,11 @@ export function FabricCanvas({ canvasRef }: FabricCanvasProps) {
     const addShapesToCanvas = async () => {
       for (const shape of shapes) {
         let fabricObj: any = null;
+
+        // Skip re-creating the actively edited textbox
+        if (activeEditingTextId && shape.id === activeEditingTextId) {
+          continue;
+        }
       
       switch (shape.type) {
         case 'rectangle':
@@ -1164,6 +1227,51 @@ export function FabricCanvas({ canvasRef }: FabricCanvasProps) {
             }
           }
           break;
+
+        case 'text':
+          {
+            const textShape: any = shape as any;
+            // Fabric internals may call `.toLowerCase()` on certain string props;
+            // ensure we always pass safe defaults.
+            const safeText = String(textShape.text ?? '');
+            const safeFontFamily = typeof textShape.fontFamily === 'string' && textShape.fontFamily.trim()
+              ? textShape.fontFamily
+              : 'Arial';
+            const safeFontStyle =
+              textShape.fontStyle === 'italic' ? 'italic' : 'normal';
+            const safeTextAlign =
+              textShape.textAlign === 'center' ||
+              textShape.textAlign === 'right' ||
+              textShape.textAlign === 'justify'
+                ? textShape.textAlign
+                : 'left';
+            const safeFill = typeof textShape.fillColor === 'string' && textShape.fillColor.trim()
+              ? textShape.fillColor
+              : '#000000';
+            const safeStroke = typeof textShape.strokeColor === 'string' && textShape.strokeColor.trim()
+              ? textShape.strokeColor
+              : 'transparent';
+
+            fabricObj = new Textbox(safeText, {
+              left: textShape.x,
+              top: textShape.y,
+              width: textShape.width ?? 260,
+              fontSize: textShape.fontSize ?? 32,
+              fontFamily: safeFontFamily,
+              fontWeight: textShape.fontWeight ?? 'normal',
+              fontStyle: safeFontStyle,
+              textAlign: safeTextAlign,
+              fill: safeFill,
+              stroke: safeStroke,
+              strokeWidth: textShape.strokeWidth ?? 0,
+              angle: textShape.rotation,
+              opacity: textShape.opacity,
+              originX: 'left',
+              originY: 'top',
+              editable: true,
+            } as any);
+          }
+          break;
       }
       
       if (fabricObj) {
@@ -1202,6 +1310,43 @@ export function FabricCanvas({ canvasRef }: FabricCanvasProps) {
             mtr: true,
           });
         }
+
+        // For Textbox, prefer horizontal resizing (wrap width) and keep vertical scaling locked.
+        if (fabricObj instanceof Textbox) {
+          fabricObj.set({
+            lockScalingY: true,
+            lockUniScaling: false,
+          } as any);
+          fabricObj.setControlsVisibility({
+            tl: false,
+            tr: false,
+            bl: false,
+            br: false,
+            ml: true,
+            mr: true,
+            mt: false,
+            mb: false,
+            mtr: true,
+          });
+
+          // Persist final text + styling when user finishes editing
+          const id = shape.id;
+          fabricObj.on('editing:exited', () => {
+            useCanvasStore.getState().updateShape(id, {
+              text: (fabricObj as any).text || '',
+              width: (fabricObj as any).width || 0,
+              fontSize: (fabricObj as any).fontSize || 32,
+              fontFamily: (fabricObj as any).fontFamily || 'Arial',
+              fontWeight: (fabricObj as any).fontWeight,
+              fontStyle: (fabricObj as any).fontStyle,
+              textAlign: (fabricObj as any).textAlign,
+              fillColor: (fabricObj as any).fill,
+              strokeColor: (fabricObj as any).stroke,
+              strokeWidth: (fabricObj as any).strokeWidth,
+              opacity: (fabricObj as any).opacity ?? 1,
+            } as any);
+          });
+        }
         
         // Apply shadow if enabled
         if (shape.shadow && shape.shadow.enabled) {
@@ -1235,6 +1380,26 @@ export function FabricCanvas({ canvasRef }: FabricCanvasProps) {
     // Restore selection if there was one
     if (objectToSelect && currentTool === 'select') {
       canvas.setActiveObject(objectToSelect);
+    }
+
+    // If we just added a text shape, enter editing immediately.
+    if (
+      pendingTextEditId &&
+      objectToSelect &&
+      (objectToSelect as any).customId === pendingTextEditId &&
+      objectToSelect instanceof Textbox &&
+      currentTool === 'select'
+    ) {
+      try {
+        objectToSelect.enterEditing();
+        if (typeof (objectToSelect as any).selectAll === 'function') {
+          (objectToSelect as any).selectAll();
+        }
+      } catch {
+        // ignore: enterEditing can throw if canvas isn't ready
+      } finally {
+        useCanvasStore.getState().setPendingTextEditId(null);
+      }
     }
     
     canvas.renderAll();

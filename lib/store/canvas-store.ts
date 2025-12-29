@@ -19,6 +19,7 @@ interface CanvasState {
   currentTool: Tool;
   backgroundImage: BackgroundImage | null;
   pendingImage: string | null; // URL or data URL of image waiting to be placed
+  pendingTextEditId: string | null; // text shape id to auto-enter editing after render
   isDarkMode: boolean;
   layerVersion: number;
   
@@ -42,6 +43,7 @@ interface CanvasState {
   setBackgroundImage: (image: BackgroundImage | null) => void;
   updateBackgroundOpacity: (opacity: number) => void;
   setPendingImage: (url: string | null) => void;
+  setPendingTextEditId: (id: string | null) => void;
   toggleDarkMode: () => void;
   
   // Drawing settings actions
@@ -76,6 +78,7 @@ export const useCanvasStore = create<CanvasState>((set, get) => ({
   currentTool: 'select',
   backgroundImage: null,
   pendingImage: null,
+  pendingTextEditId: null,
   isDarkMode: false,
   
   drawingSettings: {
@@ -152,6 +155,10 @@ export const useCanvasStore = create<CanvasState>((set, get) => ({
   
   setPendingImage: (url) => {
     set({ pendingImage: url });
+  },
+
+  setPendingTextEditId: (id) => {
+    set({ pendingTextEditId: id });
   },
   
   toggleDarkMode: () => {

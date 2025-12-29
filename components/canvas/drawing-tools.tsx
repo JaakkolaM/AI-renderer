@@ -4,6 +4,7 @@ import { useCanvasStore } from '@/lib/store/canvas-store';
 import { Tool } from '@/lib/types';
 import { 
   MousePointer2, 
+  Type,
   Square, 
   Circle, 
   Minus, 
@@ -31,6 +32,7 @@ export function DrawingTools() {
   
   const tools: { id: Tool; icon: any; label: string }[] = [
     { id: 'select', icon: MousePointer2, label: 'Select' },
+    { id: 'text', icon: Type, label: 'Text' },
     { id: 'rectangle', icon: Square, label: 'Rectangle' },
     { id: 'circle', icon: Circle, label: 'Circle' },
     { id: 'ellipse', icon: Circle, label: 'Ellipse' },

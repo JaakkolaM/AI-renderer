@@ -1,8 +1,17 @@
 // Canvas shape types
-export type ShapeType = 'rectangle' | 'circle' | 'ellipse' | 'line' | 'bezier' | 'polyline' | 'image';
+export type ShapeType =
+  | 'rectangle'
+  | 'circle'
+  | 'ellipse'
+  | 'line'
+  | 'bezier'
+  | 'polyline'
+  | 'image'
+  | 'text';
 
 export type Tool = 
   | 'select'
+  | 'text'
   | 'rectangle'
   | 'circle'
   | 'ellipse'
@@ -84,8 +93,28 @@ export interface ImageShape extends BaseShape {
   height: number;
 }
 
+// Text shape (multi-line wrapping)
+export interface TextShape extends BaseShape {
+  type: 'text';
+  text: string;
+  width: number;
+  fontSize: number;
+  fontFamily: string;
+  fontWeight?: string | number;
+  fontStyle?: 'normal' | 'italic';
+  textAlign?: 'left' | 'center' | 'right' | 'justify';
+}
+
 // Union type of all shapes
-export type Shape = RectangleShape | CircleShape | EllipseShape | LineShape | BezierShape | PolylineShape | ImageShape;
+export type Shape =
+  | RectangleShape
+  | CircleShape
+  | EllipseShape
+  | LineShape
+  | BezierShape
+  | PolylineShape
+  | ImageShape
+  | TextShape;
 
 // Drawing settings
 export interface DrawingSettings {
