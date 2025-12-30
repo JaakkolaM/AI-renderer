@@ -30,6 +30,7 @@ export function FabricCanvas({ canvasRef }: FabricCanvasProps) {
   const updateShape = useCanvasStore((state) => state.updateShape);
   const drawingSettings = useCanvasStore((state) => state.drawingSettings);
   const isDarkMode = useCanvasStore((state) => state.isDarkMode);
+  const zoom = useCanvasStore((state) => state.zoom);
   
   // Initialize Fabric canvas
   useEffect(() => {
@@ -46,7 +47,10 @@ export function FabricCanvas({ canvasRef }: FabricCanvasProps) {
     });
     
     canvasRef.current = canvas;
-    
+
+    // Apply initial zoom from store
+    canvas.setZoom(zoom);
+
     // Handle object selection
     canvas.on('selection:created', (e) => {
       if (e.selected && e.selected[0]) {
@@ -65,7 +69,7 @@ export function FabricCanvas({ canvasRef }: FabricCanvasProps) {
     canvas.on('selection:cleared', () => {
       selectShape(null);
     });
-    
+
     // Handle object modification
     canvas.on('object:modified', (e) => {
       const obj = e.target;
@@ -215,11 +219,76 @@ export function FabricCanvas({ canvasRef }: FabricCanvasProps) {
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
-    
+
     const canvasBg = isDarkMode ? '#1a1a1a' : '#ffffff';
     canvas.set('backgroundColor', canvasBg);
     canvas.renderAll();
   }, [isDarkMode]);
+
+  // Update canvas zoom when zoom changes in store
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+
+    // Only update if the zoom has changed significantly
+    const currentCanvasZoom = canvas.getZoom();
+    if (Math.abs(currentCanvasZoom - zoom) > 0.001) {
+      canvas.setZoom(zoom);
+      canvas.renderAll();
+    }
+  }, [zoom]);
+
+  // Handle zoom with mouse wheel
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+
+    const handleMouseWheel = (opt: fabric.IEvent<WheelEvent>) => {
+      if (!opt.e.ctrlKey && !opt.e.metaKey) return; // Only zoom with Ctrl+Wheel or Cmd+Wheel
+
+      const delta = opt.e.deltaY;
+      let zoom = canvas.getZoom();
+      let newZoom = zoom;
+      if (delta > 0) {
+        newZoom = zoom / 1.1; // Zoom out
+      } else {
+        newZoom = zoom * 1.1; // Zoom in
+      }
+
+      // Limit zoom between 0.1 and 5
+      newZoom = Math.max(0.1, Math.min(5, newZoom));
+
+      // Get the mouse position relative to the canvas
+      const zoomPoint = canvas.getPointer(opt.e);
+      canvas.zoomToPoint(new fabric.Point(zoomPoint.x, zoomPoint.y), newZoom);
+      opt.e.preventDefault();
+      opt.e.stopPropagation();
+
+      // Update store zoom value
+      useCanvasStore.getState().setZoom(newZoom);
+    };
+
+    canvas.on('mouse:wheel', handleMouseWheel as (options: fabric.IEvent<MouseEvent>) => void);
+
+    // Prevent default wheel behavior to avoid page scrolling
+    const container = containerRef.current;
+    const preventDefaultWheel = (e: WheelEvent) => {
+      if (e.ctrlKey || e.metaKey) {
+        e.preventDefault();
+      }
+    };
+
+    if (container) {
+      container.addEventListener('wheel', preventDefaultWheel, { passive: false });
+    }
+
+    return () => {
+      canvas.off('mouse:wheel', handleMouseWheel as (options: fabric.IEvent<MouseEvent>) => void);
+      if (container) {
+        container.removeEventListener('wheel', preventDefaultWheel);
+      }
+    };
+  }, []);
   
   // Setup drawing event handlers (updated when tool or settings change)
   useEffect(() => {
@@ -936,23 +1005,26 @@ export function FabricCanvas({ canvasRef }: FabricCanvasProps) {
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
-    
+
     canvas.setDimensions({
       width: dimensions.width,
       height: dimensions.height,
     });
-    
+
+    // Apply current zoom after dimensions change
+    canvas.setZoom(zoom);
+
     // Enable/disable selection based on tool
     canvas.selection = currentTool === 'select';
-    
+
     // Make objects selectable/non-selectable
     canvas.forEachObject((obj) => {
       obj.selectable = currentTool === 'select';
       obj.evented = currentTool === 'select';
     });
-    
+
     canvas.renderAll();
-  }, [dimensions, currentTool]);
+  }, [dimensions, currentTool, zoom]);
   
   // Load background image
   useEffect(() => {
@@ -1401,17 +1473,65 @@ export function FabricCanvas({ canvasRef }: FabricCanvasProps) {
         useCanvasStore.getState().setPendingTextEditId(null);
       }
     }
-    
+
     canvas.renderAll();
     };
-    
+
     // Call the async function to add shapes
     addShapesToCanvas();
   }, [shapes, currentTool]);
-  
+
+  // Apply zoom after shapes are loaded
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+
+    // Apply current zoom
+    canvas.setZoom(zoom);
+
+    // Add visual boundary representing actual canvas size
+    // Remove existing boundary if any
+    const existingBoundary = canvas.getObjects().find((obj: any) => obj.isCanvasBoundary);
+    if (existingBoundary) {
+      canvas.remove(existingBoundary);
+    }
+
+    // Add boundary rectangle showing actual canvas size
+    const boundary = new Rect({
+      left: 0,
+      top: 0,
+      width: dimensions.width,
+      height: dimensions.height,
+      fill: 'transparent',
+      stroke: '#9ca3af', // slate-400 (light grey)
+      strokeWidth: 1,
+      selectable: false,
+      evented: false,
+      strokeDashArray: [5, 5], // Dashed line
+      isCanvasBoundary: true, // Custom property to identify this object
+      shadow: new fabric.Shadow({
+        color: 'rgba(0,0,0,0.3)',
+        blur: 5,
+        offsetX: 0,
+        offsetY: 0,
+      }),
+    });
+
+    // Add boundary to canvas - add it first so it's in the back by default
+    canvas.add(boundary);
+
+    canvas.renderAll();
+  }, [zoom, shapes.length, dimensions]); // Depend on shapes.length to ensure zoom is applied after shapes are loaded
+
   return (
-    <div className="border-2 border-border rounded-lg overflow-hidden shadow-lg bg-card">
-      <canvas ref={containerRef} />
+    <div className="w-full h-full min-h-[500px]">
+      <div className="w-full h-full overflow-auto">
+        <div className="flex items-center justify-center min-h-full min-w-full p-4">
+          <div className="border-2 border-border rounded-lg overflow-hidden shadow-lg bg-card canvas-container">
+            <canvas ref={containerRef} />
+          </div>
+        </div>
+      </div>
     </div>
   );
 }

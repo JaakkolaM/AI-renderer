@@ -91,18 +91,49 @@ export function AIGeneration() {
     }
 
     try {
+      // Store current zoom and position
+      const currentZoom = canvas.getZoom();
+      const currentViewportTransform = [...(canvas.viewportTransform || [])];
+
+      // Reset zoom to 100% and center the view
+      canvas.setViewportTransform([1, 0, 0, 1, 0, 0]); // Reset transformation
+      canvas.setZoom(1);
+
+      // Find the boundary to temporarily hide it during export
+      const boundary = canvas.getObjects().find((obj: any) => obj.isCanvasBoundary);
+
+      // Temporarily hide the boundary during export
+      let wasVisible = false;
+      if (boundary) {
+        wasVisible = boundary.visible;
+        boundary.visible = false;
+        canvas.renderAll();
+      }
+
       // Export Fabric.js canvas as PNG data URL
       const dataURL = canvas.toDataURL({
         format: 'png',
         quality: 1,
         multiplier: 1,
       });
-      
+
+      // Restore boundary visibility after export
+      if (boundary) {
+        boundary.visible = wasVisible;
+      }
+
+      // Restore original zoom and position
+      canvas.setZoom(currentZoom);
+      if (currentViewportTransform) {
+        canvas.setViewportTransform(currentViewportTransform);
+      }
+      canvas.renderAll();
+
       if (!dataURL) {
         console.error('Canvas export returned empty data URL');
         return null;
       }
-      
+
       return dataURL;
     } catch (error) {
       console.error('Failed to export canvas:', error);

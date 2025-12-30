@@ -1,14 +1,17 @@
 'use client';
 
 import { useCanvasStore } from '@/lib/store/canvas-store';
-import { 
-  Undo2, 
-  Redo2, 
-  Trash2, 
+import {
+  Undo2,
+  Redo2,
+  Trash2,
   Download,
   Upload,
   Image as ImageIcon,
-  X
+  X,
+  ZoomIn,
+  ZoomOut,
+  RotateCcw
 } from 'lucide-react';
 import { useCallback, useEffect, useState } from 'react';
 import { useDropzone } from 'react-dropzone';
@@ -38,6 +41,7 @@ export function CanvasControls() {
     const match = findMatchingPreset(dimensions.width, dimensions.height);
     return match ? 'preset' : 'custom';
   });
+  const zoom = useCanvasStore((state) => state.zoom);
   const [presetLongEdge, setPresetLongEdge] = useState<ResolutionLongEdge>(() => {
     const match = findMatchingPreset(dimensions.width, dimensions.height);
     return match?.longEdge ?? 1024;
@@ -101,14 +105,97 @@ export function CanvasControls() {
   const exportPng = () => {
     const canvas = canvasRef?.current;
     if (!canvas) return;
-    const dataUrl = canvas.toDataURL({ format: 'png', multiplier: 1 });
+
+    // Store current zoom and position
+    const currentZoom = canvas.getZoom();
+    const currentViewportTransform = [...(canvas.viewportTransform || [])];
+
+    // Reset zoom to 100% and center the view
+    canvas.setViewportTransform([1, 0, 0, 1, 0, 0]); // Reset transformation
+    canvas.setZoom(1);
+
+    // Find the boundary to determine crop area
+    const boundary = canvas.getObjects().find((obj: any) => obj.isCanvasBoundary);
+
+    // Temporarily hide the boundary during export
+    let wasVisible = false;
+    if (boundary) {
+      wasVisible = boundary.visible;
+      boundary.visible = false;
+      canvas.renderAll();
+    }
+
+    // Export with the boundary dimensions (cropped to boundary area)
+    const dataUrl = canvas.toDataURL({
+      format: 'png',
+      multiplier: 1,
+      left: boundary?.left || 0,
+      top: boundary?.top || 0,
+      width: boundary?.width || canvas.width,
+      height: boundary?.height || canvas.height
+    });
+
+    // Restore boundary visibility after export
+    if (boundary) {
+      boundary.visible = wasVisible;
+    }
+
+    // Restore original zoom and position
+    canvas.setZoom(currentZoom);
+    if (currentViewportTransform) {
+      canvas.setViewportTransform(currentViewportTransform);
+    }
+    canvas.renderAll();
+
     downloadDataUrl(dataUrl, `ai-renderer-${Date.now()}.png`);
   };
 
   const exportJpg = () => {
     const canvas = canvasRef?.current;
     if (!canvas) return;
-    const dataUrl = canvas.toDataURL({ format: 'jpeg', quality: 0.92, multiplier: 1 });
+
+    // Store current zoom and position
+    const currentZoom = canvas.getZoom();
+    const currentViewportTransform = [...(canvas.viewportTransform || [])];
+
+    // Reset zoom to 100% and center the view
+    canvas.setViewportTransform([1, 0, 0, 1, 0, 0]); // Reset transformation
+    canvas.setZoom(1);
+
+    // Find the boundary to determine crop area
+    const boundary = canvas.getObjects().find((obj: any) => obj.isCanvasBoundary);
+
+    // Temporarily hide the boundary during export
+    let wasVisible = false;
+    if (boundary) {
+      wasVisible = boundary.visible;
+      boundary.visible = false;
+      canvas.renderAll();
+    }
+
+    // Export with the boundary dimensions (cropped to boundary area)
+    const dataUrl = canvas.toDataURL({
+      format: 'jpeg',
+      quality: 0.92,
+      multiplier: 1,
+      left: boundary?.left || 0,
+      top: boundary?.top || 0,
+      width: boundary?.width || canvas.width,
+      height: boundary?.height || canvas.height
+    });
+
+    // Restore boundary visibility after export
+    if (boundary) {
+      boundary.visible = wasVisible;
+    }
+
+    // Restore original zoom and position
+    canvas.setZoom(currentZoom);
+    if (currentViewportTransform) {
+      canvas.setViewportTransform(currentViewportTransform);
+    }
+    canvas.renderAll();
+
     downloadDataUrl(dataUrl, `ai-renderer-${Date.now()}.jpg`);
   };
   
@@ -290,6 +377,37 @@ export function CanvasControls() {
           <Trash2 size={16} />
           Clear All
         </button>
+
+        {/* Divider */}
+        <div className="h-8 w-px bg-border" />
+
+        {/* Zoom Controls */}
+        <div className="flex items-center gap-2">
+          <button
+            onClick={() => useCanvasStore.getState().zoomOut()}
+            className="p-2 bg-secondary hover:bg-secondary/80 rounded text-secondary-foreground"
+            title="Zoom Out"
+          >
+            <ZoomOut size={16} />
+          </button>
+          <span className="text-sm font-medium text-foreground min-w-[60px] text-center">
+            {Math.round(zoom * 100)}%
+          </span>
+          <button
+            onClick={() => useCanvasStore.getState().zoomIn()}
+            className="p-2 bg-secondary hover:bg-secondary/80 rounded text-secondary-foreground"
+            title="Zoom In"
+          >
+            <ZoomIn size={16} />
+          </button>
+          <button
+            onClick={() => useCanvasStore.getState().resetZoom()}
+            className="p-2 bg-secondary hover:bg-secondary/80 rounded text-secondary-foreground"
+            title="Reset Zoom"
+          >
+            <RotateCcw size={16} />
+          </button>
+        </div>
 
         {/* Divider */}
         <div className="h-8 w-px bg-border" />

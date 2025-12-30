@@ -173,5 +173,9 @@ body {
   .text-balance {
     text-wrap: balance;
   }
+
+  .canvas-container {
+    transform-origin: center center;
+  }
 }
 

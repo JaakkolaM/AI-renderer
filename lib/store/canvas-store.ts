@@ -22,6 +22,7 @@ interface CanvasState {
   pendingTextEditId: string | null; // text shape id to auto-enter editing after render
   isDarkMode: boolean;
   layerVersion: number;
+  zoom: number;
   
   // Drawing settings
   drawingSettings: DrawingSettings;
@@ -45,6 +46,10 @@ interface CanvasState {
   setPendingImage: (url: string | null) => void;
   setPendingTextEditId: (id: string | null) => void;
   toggleDarkMode: () => void;
+  setZoom: (zoom: number) => void;
+  zoomIn: () => void;
+  zoomOut: () => void;
+  resetZoom: () => void;
   
   // Drawing settings actions
   setStrokeColor: (color: string) => void;
@@ -80,6 +85,7 @@ export const useCanvasStore = create<CanvasState>((set, get) => ({
   pendingImage: null,
   pendingTextEditId: null,
   isDarkMode: false,
+  zoom: 1,
   
   drawingSettings: {
     strokeColor: '#000000',
@@ -163,6 +169,22 @@ export const useCanvasStore = create<CanvasState>((set, get) => ({
   
   toggleDarkMode: () => {
     set((state) => ({ isDarkMode: !state.isDarkMode }));
+  },
+
+  setZoom: (zoom) => {
+    set({ zoom: Math.max(0.1, Math.min(5, zoom)) }); // Limit zoom between 0.1 and 5
+  },
+
+  zoomIn: () => {
+    set((state) => ({ zoom: Math.min(5, state.zoom + 0.2) })); // Max zoom 5x
+  },
+
+  zoomOut: () => {
+    set((state) => ({ zoom: Math.max(0.1, state.zoom - 0.2) })); // Min zoom 0.1x
+  },
+
+  resetZoom: () => {
+    set({ zoom: 1 });
   },
   
   // Drawing settings actions
