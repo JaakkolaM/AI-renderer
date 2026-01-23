@@ -12,11 +12,12 @@ import {
   type ResolutionLongEdge,
   computeTargetFromLongEdge,
 } from '@/lib/sizing';
+import { MODELS, DEFAULT_MODEL } from '@/lib/models';
 
 export function AIGeneration() {
   const [prompt, setPrompt] = useState('');
   const [useCanvas, setUseCanvas] = useState(false);
-  const [quality, setQuality] = useState<'preview' | 'final'>('preview');
+  const [selectedModel, setSelectedModel] = useState<string>(DEFAULT_MODEL);
   const [isGenerating, setIsGenerating] = useState(false);
   const [generatedImage, setGeneratedImage] = useState<string | null>(null);
   const [generatedMeta, setGeneratedMeta] = useState<{ width: number; height: number } | null>(null);
@@ -170,7 +171,7 @@ export function AIGeneration() {
           prompt,
           canvasImage,
           useCanvas,
-          quality,
+          model: selectedModel,
           preset: selectedPreset,
           materialReferences: materialReferences.map((m) => ({
             dataUrl: m.dataUrl,
@@ -191,6 +192,10 @@ export function AIGeneration() {
       }
 
       if (data.success && data.imageUrl) {
+        console.log('[FRONTEND DEBUG] Generation completed:', {
+          modelUsed: data.model,
+          imageSize: { width: data.outputWidth, height: data.outputHeight }
+        });
         setGeneratedImage(data.imageUrl);
         if (typeof data.outputWidth === 'number' && typeof data.outputHeight === 'number') {
           setGeneratedMeta({ width: data.outputWidth, height: data.outputHeight });
@@ -380,38 +385,39 @@ export function AIGeneration() {
         </div>
       </div>
 
-      {/* Quality Selection */}
+      {/* Model Selection */}
       <div className="mb-4">
         <label className="text-xs font-medium block mb-2 text-foreground">
-          Quality
+          Model
         </label>
-        <div className="flex gap-2">
-          <button
-            onClick={() => setQuality('preview')}
-            className={`flex-1 px-3 py-2 rounded text-xs font-medium ${
-              quality === 'preview'
-                ? 'bg-primary text-primary-foreground'
-                : 'bg-card hover:bg-accent text-card-foreground border border-border'
-            }`}
-          >
-            Preview (Fast)
-          </button>
-          <button
-            onClick={() => setQuality('final')}
-            className={`flex-1 px-3 py-2 rounded text-xs font-medium ${
-              quality === 'final'
-                ? 'bg-primary text-primary-foreground'
-                : 'bg-card hover:bg-accent text-card-foreground border border-border'
-            }`}
-          >
-            Final (HQ)
-          </button>
+        <div className="space-y-2">
+          {Object.values(MODELS).map((model) => (
+            <label
+              key={model.id}
+              className={`flex items-center gap-3 p-3 rounded cursor-pointer border ${
+                selectedModel === model.id
+                  ? 'bg-primary/10 border-primary'
+                  : 'bg-card border-border hover:bg-accent'
+              }`}
+            >
+              <input
+                type="radio"
+                name="model"
+                checked={selectedModel === model.id}
+                onChange={() => setSelectedModel(model.id)}
+                className="cursor-pointer"
+              />
+              <div className="flex-1">
+                <div className="text-sm font-medium text-foreground">
+                  {model.name}
+                </div>
+                <div className="text-xs text-muted-foreground">
+                  {model.description}
+                </div>
+              </div>
+            </label>
+          ))}
         </div>
-        <p className="text-xs text-muted-foreground mt-1">
-          {quality === 'preview' 
-            ? 'Nano Banana: Fast generation with low latency' 
-            : 'Nano Banana Pro: 4K resolution, high fidelity'}
-        </p>
       </div>
 
       {/* Output Size */}
